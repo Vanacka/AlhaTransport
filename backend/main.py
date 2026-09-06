@@ -152,13 +152,13 @@ def create_default_admin():
     """
     db = SessionLocal()
     try:
-        username = os.getenv("ADMIN_USERNAME", "mirek")
+        username = os.getenv("ADMIN_USERNAME", "admin")
         if not db.query(User).filter(User.username == username).first():
-            password = os.getenv("ADMIN_PASSWORD", "changeme123")
+            password = os.getenv("ADMIN_PASSWORD", "admin")
             db.add(User(
                 username=username,
                 hashed_password=hash_password(password),
-                full_name="Mirek",
+                full_name="Admin",
                 role=UserRole.admin,
             ))
             db.commit()

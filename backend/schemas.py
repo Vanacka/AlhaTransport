@@ -106,6 +106,12 @@ class VacationDayColor(BaseModel):
     holiday_name: Optional[str] = None
 
 
+class TodayStatusOut(BaseModel):
+    is_day_off: bool
+    reason: Optional[str] = None  # "weekend" | "holiday" | "vacation" | None
+    holiday_name: Optional[str] = None
+
+
 # ---------- Performance ----------
 
 class RouteCreate(BaseModel):
@@ -268,7 +274,9 @@ class DailyChecklistOut(BaseModel):
     car_checked: bool
     refueled: bool
     form_filled: bool  # dopočítáno z existence PerformanceEntry za daný den
-    on_vacation: bool  # dopočítáno ze schválené dovolené na daný den
+    is_day_off: bool  # víkend, státní svátek, nebo schválená dovolená
+    day_off_reason: Optional[str] = None  # "weekend" | "holiday" | "vacation" | None
+    holiday_name: Optional[str] = None
 
 
 # ---------- Notifications ----------

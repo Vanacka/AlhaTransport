@@ -8,7 +8,9 @@ interface Checklist {
   car_checked: boolean
   refueled: boolean
   form_filled: boolean
-  on_vacation: boolean
+  is_day_off: boolean
+  day_off_reason: 'weekend' | 'holiday' | 'vacation' | null
+  holiday_name: string | null
 }
 
 const { user } = useAuth()
@@ -18,6 +20,12 @@ const savingField = ref<'car_checked' | 'refueled' | null>(null)
 const todayLabel = computed(() =>
   new Date().toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' }),
 )
+
+const dayOffTitle = computed(() => {
+  if (checklist.value?.day_off_reason === 'weekend') return 'Dnes je víkend'
+  if (checklist.value?.day_off_reason === 'holiday') return 'Dnes je státní svátek'
+  return 'Dnes máš dovolenou'
+})
 
 const doneCount = computed(() => {
   if (!checklist.value) return 0
@@ -52,8 +60,8 @@ onMounted(load)
     <h1><span class="eyebrow">Dnešní směna</span>Ahoj, {{ user?.full_name }}</h1>
     <p class="today-date">{{ todayLabel }}</p>
 
-    <div class="card vacation-card" v-if="checklist?.on_vacation">
-      <h3 style="margin-top: 0">Dnes máš dovolenou</h3>
+    <div class="card vacation-card" v-if="checklist?.is_day_off">
+      <h3 style="margin-top: 0">{{ dayOffTitle }}{{ checklist.holiday_name ? ` (${checklist.holiday_name})` : '' }}</h3>
       <p style="margin: 0; color: var(--muted)">Žádné úkoly na dnešek nemáš, užij si volno.</p>
     </div>
 

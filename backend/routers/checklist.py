@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from auth import get_current_user, require_admin
-from models import User, UserRole, DailyChecklist, PerformanceEntry, VacationDay, VacationStatus, Notification
+from models import User, UserRole, DailyChecklist, PerformanceEntry, Notification
 from schemas import DailyChecklistOut, DailyChecklistUpdate
+from day_off import day_off_reason
 
 router = APIRouter(prefix="/checklist", tags=["checklist"])
 
@@ -34,17 +35,11 @@ def _form_filled(db: Session, user_id: int, today: date_type) -> bool:
     ).first() is not None
 
 
-def _is_on_vacation(db: Session, user_id: int, day: date_type) -> bool:
-    return db.query(VacationDay).filter(
-        VacationDay.user_id == user_id, VacationDay.date == day,
-        VacationDay.status == VacationStatus.approved,
-    ).first() is not None
-
-
-def _to_out(item: DailyChecklist, form_filled: bool, on_vacation: bool) -> DailyChecklistOut:
+def _to_out(item: DailyChecklist, form_filled: bool, user_id: int, day: date_type, db: Session) -> DailyChecklistOut:
+    is_day_off, reason, holiday_name = day_off_reason(db, user_id, day)
     return DailyChecklistOut(
         date=item.date, car_checked=item.car_checked, refueled=item.refueled,
-        form_filled=form_filled, on_vacation=on_vacation,
+        form_filled=form_filled, is_day_off=is_day_off, day_off_reason=reason, holiday_name=holiday_name,
     )
 
 
@@ -52,11 +47,7 @@ def _to_out(item: DailyChecklist, form_filled: bool, on_vacation: bool) -> Daily
 def get_today(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     today = date_type.today()
     item = _get_or_create_today(db, current_user.id, today)
-    return _to_out(
-        item,
-        _form_filled(db, current_user.id, today),
-        _is_on_vacation(db, current_user.id, today),
-    )
+    return _to_out(item, _form_filled(db, current_user.id, today), current_user.id, today, db)
 
 
 @router.patch("/today", response_model=DailyChecklistOut)
@@ -75,17 +66,14 @@ def update_today(
         item.refueled = payload.refueled
     db.commit()
     db.refresh(item)
-    return _to_out(
-        item,
-        _form_filled(db, current_user.id, today),
-        _is_on_vacation(db, current_user.id, today),
-    )
+    return _to_out(item, _form_filled(db, current_user.id, today), current_user.id, today, db)
 
 
 def run_daily_incomplete_check(db: Session, day: date_type) -> int:
     """Pro daný den zkontroluje všechny aktivní uživatele (kurýry i admina, pokud
     ten den jel jako kurýr) a adminům pošle upozornění na každého, kdo nemá
-    hotový celý checklist a zároveň nemá ten den schválenou dovolenou.
+    hotový celý checklist - kromě dnů, kdy stejně nebylo co dělat (víkend,
+    státní svátek nebo schválená dovolená).
     Idempotentní přes DailyChecklist.notified_incomplete, aby stejný den
     neposílalo notifikace opakovaně (např. po restartu serveru).
     """
@@ -95,7 +83,8 @@ def run_daily_incomplete_check(db: Session, day: date_type) -> int:
 
     notified = 0
     for u in db.query(User).filter(User.is_active == True).all():  # noqa: E712
-        if _is_on_vacation(db, u.id, day):
+        is_day_off, _, _ = day_off_reason(db, u.id, day)
+        if is_day_off:
             continue
 
         item = db.query(DailyChecklist).filter(

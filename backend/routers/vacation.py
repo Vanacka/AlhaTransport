@@ -8,9 +8,10 @@ from database import get_db
 from auth import get_current_user, require_admin
 from models import User, UserRole, VacationDay, VacationStatus
 from schemas import (
-    VacationRequestCreate, VacationRangeRequestCreate, VacationDayOut, VacationDayColor,
+    VacationRequestCreate, VacationRangeRequestCreate, VacationDayOut, VacationDayColor, TodayStatusOut,
 )
 from holidays import is_czech_state_holiday, czech_state_holiday_name
+from day_off import day_off_reason
 
 router = APIRouter(prefix="/vacation", tags=["vacation"])
 
@@ -35,15 +36,6 @@ def request_vacation(
     ).first()
     if existing:
         raise HTTPException(400, "Na tento den už máš žádost o dovolenou")
-
-    # Počítá se i čekající (ne jen schválená) dovolená - jinak by šlo nabrat
-    # pending žádostí přes limit a čekat, až je admin (nevědomky) schválí.
-    used_days = db.query(VacationDay).filter(
-        VacationDay.user_id == current_user.id,
-        VacationDay.status.in_([VacationStatus.approved, VacationStatus.pending]),
-    ).count()
-    if used_days >= current_user.vacation_days_limit:
-        raise HTTPException(400, "Vyčerpal jsi limit dní na dovolenou")
 
     entry = VacationDay(user_id=current_user.id, date=payload.date, status=VacationStatus.pending)
     db.add(entry)
@@ -80,17 +72,6 @@ def request_vacation_range(
     if conflicting:
         first = min(d for (d,) in conflicting)
         raise HTTPException(400, f"Na {first.isoformat()} už máš žádost o dovolenou")
-
-    used_days = db.query(VacationDay).filter(
-        VacationDay.user_id == current_user.id,
-        VacationDay.status.in_([VacationStatus.approved, VacationStatus.pending]),
-    ).count()
-    remaining = current_user.vacation_days_limit - used_days
-    if len(workdays) > remaining:
-        raise HTTPException(
-            400,
-            f"Žádáš o {len(workdays)} pracovních dní, ale zbývá ti jen {remaining} z limitu dovolené",
-        )
 
     entries = [VacationDay(user_id=current_user.id, date=d, status=VacationStatus.pending) for d in workdays]
     db.add_all(entries)
@@ -201,6 +182,15 @@ def my_vacations(db: Session = Depends(get_db), current_user: User = Depends(get
 @router.get("/pending", response_model=list[VacationDayOut])
 def pending_vacations(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     return db.query(VacationDay).filter(VacationDay.status == VacationStatus.pending).all()
+
+
+@router.get("/today-status", response_model=TodayStatusOut)
+def today_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Řekne, jestli je pro přihlášeného uživatele dnešek volno (víkend, státní
+    svátek nebo schválená dovolená) - kvůli formuláři výkonu, který se v ten
+    den vůbec nemá nabízet."""
+    is_day_off, reason, holiday_name = day_off_reason(db, current_user.id, date_type.today())
+    return TodayStatusOut(is_day_off=is_day_off, reason=reason, holiday_name=holiday_name)
 
 
 @router.get("/calendar", response_model=list[VacationDayColor])
