@@ -269,6 +269,25 @@ class DailyChecklistUpdate(BaseModel):
     refueled: Optional[bool] = None
 
 
+class HomeTaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: int
+    date: date
+    text: str
+    done: bool
+
+
+class HomeTaskCreate(BaseModel):
+    text: str
+    date: date
+    user_ids: list[int]
+
+
+class HomeTaskUpdate(BaseModel):
+    done: bool
+
+
 class DailyChecklistOut(BaseModel):
     date: date
     car_checked: bool
@@ -277,6 +296,7 @@ class DailyChecklistOut(BaseModel):
     is_day_off: bool  # víkend, státní svátek, nebo schválená dovolená
     day_off_reason: Optional[str] = None  # "weekend" | "holiday" | "vacation" | None
     holiday_name: Optional[str] = None
+    extra_tasks: list[HomeTaskOut] = []
 
 
 # ---------- Notifications ----------

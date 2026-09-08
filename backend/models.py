@@ -252,6 +252,24 @@ class DailyChecklist(Base):
     user = relationship("User")
 
 
+class HomeTask(Base):
+    """Ad-hoc úkol navíc, který admin přiřadí konkrétnímu kurýrovi na konkrétní
+    den (nezávisle na standardním checklistu auto/tankování/formulář) - typicky
+    jednorázová věc jako 'vyzvedni si výplatu' nebo 'přijeď na schůzku'."""
+    __tablename__ = "home_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    text = Column(String, nullable=False)
+    done = Column(Boolean, default=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", foreign_keys=[user_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 
