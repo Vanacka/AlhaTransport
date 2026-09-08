@@ -1,13 +1,15 @@
-from datetime import date as date_type
+import calendar
+from datetime import date as date_type, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
 from auth import get_current_user, require_admin
-from models import User, UserRole, DailyChecklist, PerformanceEntry, VacationDay, VacationStatus, Notification
-from schemas import DailyChecklistOut, DailyChecklistUpdate
+from models import User, UserRole, DailyChecklist, PerformanceEntry, Notification, HomeTask
+from schemas import DailyChecklistOut, DailyChecklistUpdate, HomeTaskOut, HomeTaskCreate, HomeTaskUpdate
+from day_off import day_off_reason
 
 router = APIRouter(prefix="/checklist", tags=["checklist"])
 
@@ -34,17 +36,16 @@ def _form_filled(db: Session, user_id: int, today: date_type) -> bool:
     ).first() is not None
 
 
-def _is_on_vacation(db: Session, user_id: int, day: date_type) -> bool:
-    return db.query(VacationDay).filter(
-        VacationDay.user_id == user_id, VacationDay.date == day,
-        VacationDay.status == VacationStatus.approved,
-    ).first() is not None
+def _extra_tasks(db: Session, user_id: int, day: date_type) -> list[HomeTask]:
+    return db.query(HomeTask).filter(HomeTask.user_id == user_id, HomeTask.date == day).all()
 
 
-def _to_out(item: DailyChecklist, form_filled: bool, on_vacation: bool) -> DailyChecklistOut:
+def _to_out(item: DailyChecklist, form_filled: bool, user_id: int, day: date_type, db: Session) -> DailyChecklistOut:
+    is_day_off, reason, holiday_name = day_off_reason(db, user_id, day)
     return DailyChecklistOut(
         date=item.date, car_checked=item.car_checked, refueled=item.refueled,
-        form_filled=form_filled, on_vacation=on_vacation,
+        form_filled=form_filled, is_day_off=is_day_off, day_off_reason=reason, holiday_name=holiday_name,
+        extra_tasks=_extra_tasks(db, user_id, day),
     )
 
 
@@ -52,11 +53,7 @@ def _to_out(item: DailyChecklist, form_filled: bool, on_vacation: bool) -> Daily
 def get_today(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     today = date_type.today()
     item = _get_or_create_today(db, current_user.id, today)
-    return _to_out(
-        item,
-        _form_filled(db, current_user.id, today),
-        _is_on_vacation(db, current_user.id, today),
-    )
+    return _to_out(item, _form_filled(db, current_user.id, today), current_user.id, today, db)
 
 
 @router.patch("/today", response_model=DailyChecklistOut)
@@ -75,17 +72,14 @@ def update_today(
         item.refueled = payload.refueled
     db.commit()
     db.refresh(item)
-    return _to_out(
-        item,
-        _form_filled(db, current_user.id, today),
-        _is_on_vacation(db, current_user.id, today),
-    )
+    return _to_out(item, _form_filled(db, current_user.id, today), current_user.id, today, db)
 
 
 def run_daily_incomplete_check(db: Session, day: date_type) -> int:
     """Pro daný den zkontroluje všechny aktivní uživatele (kurýry i admina, pokud
     ten den jel jako kurýr) a adminům pošle upozornění na každého, kdo nemá
-    hotový celý checklist a zároveň nemá ten den schválenou dovolenou.
+    hotový celý checklist - kromě dnů, kdy stejně nebylo co dělat (víkend,
+    státní svátek nebo schválená dovolená).
     Idempotentní přes DailyChecklist.notified_incomplete, aby stejný den
     neposílalo notifikace opakovaně (např. po restartu serveru).
     """
@@ -95,7 +89,8 @@ def run_daily_incomplete_check(db: Session, day: date_type) -> int:
 
     notified = 0
     for u in db.query(User).filter(User.is_active == True).all():  # noqa: E712
-        if _is_on_vacation(db, u.id, day):
+        is_day_off, _, _ = day_off_reason(db, u.id, day)
+        if is_day_off:
             continue
 
         item = db.query(DailyChecklist).filter(
@@ -145,3 +140,151 @@ def trigger_daily_check(
     day = target_date or date_type.today()
     notified = run_daily_incomplete_check(db, day)
     return {"date": day, "notified": notified}
+
+
+MAX_TASK_OCCURRENCES = 60
+
+
+def _add_month(d: date_type, anchor_day: int) -> date_type:
+    """Posune na stejný den v dalším měsíci jako `anchor_day` (např. pořád 31.,
+    ne postupně se ukrajující den) - v měsíci, který ten den nemá (typicky únor),
+    se ořízne na jeho poslední den, ale příští měsíc už se zase vrátí na anchor_day."""
+    year = d.year + d.month // 12
+    month = d.month % 12 + 1
+    last_day = calendar.monthrange(year, month)[1]
+    return date_type(year, month, min(anchor_day, last_day))
+
+
+def _occurrence_dates(payload: HomeTaskCreate) -> list[date_type]:
+    unit = payload.repeat_unit or "once"
+    if unit == "once":
+        return [payload.date]
+
+    if not payload.repeat_until:
+        raise HTTPException(400, "Vyber datum, do kdy se má úkol opakovat")
+    if payload.repeat_until < payload.date:
+        raise HTTPException(400, "Konec opakování nesmí být před prvním dnem")
+
+    dates: list[date_type] = []
+
+    if unit == "week":
+        interval = payload.repeat_interval or 1
+        if interval < 1:
+            raise HTTPException(400, "Interval opakování musí být aspoň 1 týden")
+        weekdays = set(payload.weekdays or [])
+        if not weekdays:
+            raise HTTPException(400, "Vyber aspoň jeden pracovní den, ve kterém se má úkol opakovat")
+        if not weekdays.issubset({0, 1, 2, 3, 4}):
+            raise HTTPException(400, "Opakování jde nastavit jen na pracovní dny (pondělí až pátek)")
+
+        anchor_monday = payload.date - timedelta(days=payload.date.weekday())
+        d = payload.date
+        while d <= payload.repeat_until:
+            if d.weekday() in weekdays and ((d - anchor_monday).days // 7) % interval == 0:
+                dates.append(d)
+                if len(dates) > MAX_TASK_OCCURRENCES:
+                    raise HTTPException(
+                        400, f"Příliš mnoho výskytů (max {MAX_TASK_OCCURRENCES}) - zkrať období nebo interval",
+                    )
+            d += timedelta(days=1)
+
+    elif unit == "month":
+        anchor_day = payload.date.day
+        d = payload.date
+        while d <= payload.repeat_until:
+            dates.append(d)
+            if len(dates) > MAX_TASK_OCCURRENCES:
+                raise HTTPException(
+                    400, f"Příliš mnoho výskytů (max {MAX_TASK_OCCURRENCES}) - zkrať období",
+                )
+            d = _add_month(d, anchor_day)
+
+    else:
+        raise HTTPException(400, "Neplatný typ opakování")
+
+    if not dates:
+        raise HTTPException(400, "Zvolené opakování v daném období nevygenerovalo žádný den")
+    return dates
+
+
+@router.post("/tasks", response_model=list[HomeTaskOut])
+def create_home_tasks(
+    payload: HomeTaskCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Přidá ad-hoc úkol navíc jednomu nebo víc kurýrům na konkrétní den, případně
+    opakovaně (v zaškrtnutých pracovních dnech každý týden/N týdnů, nebo každý
+    měsíc) až do zvoleného konce - kurýr ho uvidí na hlavní stránce, ať už je ten
+    den víkend, svátek, dovolená, nebo normální pracovní den. Všechny takto vzniklé
+    řádky sdílí stejné series_id, aby šly případně smazat najednou jako celek."""
+    if not payload.user_ids:
+        raise HTTPException(400, "Vyber aspoň jednoho kurýra")
+
+    dates = _occurrence_dates(payload)
+    tasks = [
+        HomeTask(user_id=uid, date=d, text=payload.text, created_by_id=current_user.id)
+        for d in dates
+        for uid in payload.user_ids
+    ]
+    db.add_all(tasks)
+    db.flush()
+    series_id = tasks[0].id
+    for t in tasks:
+        t.series_id = series_id
+    db.commit()
+    for t in tasks:
+        db.refresh(t)
+    return tasks
+
+
+@router.get("/tasks", response_model=list[HomeTaskOut])
+def list_home_tasks(
+    from_date: Optional[date_type] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Přehled úkolů pro admina - defaultně jen dnešní a budoucí, ať se
+    nekupí staré vyřízené položky."""
+    q = db.query(HomeTask)
+    q = q.filter(HomeTask.date >= (from_date or date_type.today()))
+    return q.order_by(HomeTask.date, HomeTask.id).all()
+
+
+@router.patch("/tasks/{task_id}", response_model=HomeTaskOut)
+def update_home_task(
+    task_id: int,
+    payload: HomeTaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Kurýr smí odškrtnout jen svůj vlastní úkol, admin kterýkoliv."""
+    task = db.query(HomeTask).filter(HomeTask.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "Úkol nenalezen")
+    if current_user.role != UserRole.admin and task.user_id != current_user.id:
+        raise HTTPException(403, "Nemáš oprávnění upravit tento úkol")
+    task.done = payload.done
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.delete("/tasks/series/{series_id}")
+def delete_home_task_series(series_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """Smaže najednou všechny výskyty jedné opakující se (nebo víc-kurýrní) série."""
+    deleted = db.query(HomeTask).filter(HomeTask.series_id == series_id).delete()
+    db.commit()
+    if not deleted:
+        raise HTTPException(404, "Série nenalezena")
+    return {"ok": True, "deleted": deleted}
+
+
+@router.delete("/tasks/{task_id}")
+def delete_home_task(task_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    task = db.query(HomeTask).filter(HomeTask.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "Úkol nenalezen")
+    db.delete(task)
+    db.commit()
+    return {"ok": True}

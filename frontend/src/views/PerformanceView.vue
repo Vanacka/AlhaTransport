@@ -47,6 +47,7 @@ interface Average {
   entries_count: number
 }
 interface UserOption { id: number; full_name: string; role: 'admin' | 'courier' }
+interface TodayStatus { is_day_off: boolean; reason: 'weekend' | 'holiday' | 'vacation' | null; holiday_name: string | null }
 interface EditLogEntry {
   id: number
   edited_by_id: number
@@ -184,6 +185,16 @@ const todayEntry = ref<Entry | null>(null)
 // pro vyplnění/nahlášení, jako by se nic nestalo.
 const todayDispute = ref<Dispute | null>(null)
 
+// Víkend, státní svátek nebo schválená dovolená na dnešek - formulář pro nový
+// záznam se v ten den vůbec nemá nabízet, ať to nikoho nemate k vyplňování.
+const todayStatus = ref<TodayStatus | null>(null)
+const todayDayOffMessage = computed(() => {
+  if (!todayStatus.value?.is_day_off) return ''
+  if (todayStatus.value.reason === 'vacation') return 'Dnes máš dovolenou.'
+  if (todayStatus.value.reason === 'holiday') return `Dnes je státní svátek${todayStatus.value.holiday_name ? ` (${todayStatus.value.holiday_name})` : ''}.`
+  return 'Dnes je víkend.'
+})
+
 // Když kurýr rozjede wizard nad hlášením chyby (jeho vlastní pending dispute),
 // odesílá se přes PATCH na dispute, ne přes POST na nový záznam.
 const resumingDispute = ref<number | null>(null)
@@ -209,6 +220,15 @@ const currentStepDef = computed<Step>(() => activeWizardSteps.value[currentStep.
 
 const showTodayDoneMessage = computed(() =>
   !editingId.value && !resumingDispute.value && (todayEntry.value?.confirmed === true || !!todayDispute.value),
+)
+
+// Karta "dnes máš volno" jde přebít - kurýr může i tak chtít zpětně vyplnit
+// jiný den (nebo i dnešek, pokud přesto pracoval), viz tlačítko na kartě.
+const forceShowForm = ref(false)
+
+const showDayOffMessage = computed(() =>
+  !showTodayDoneMessage.value && !wizardActive.value && !editingId.value &&
+  !resumingDispute.value && !reportMode.value && !!todayStatus.value?.is_day_off && !forceShowForm.value,
 )
 
 // Zpětně vyplňovaný formulář (jiný den než dnešek) nejde nechat nekompletní -
@@ -307,6 +327,7 @@ async function findMyPendingDispute(dateStr: string): Promise<Dispute | null> {
 }
 
 async function checkTodayEntry() {
+  todayStatus.value = await api.get<TodayStatus>('/vacation/today-status')
   const todayIso = new Date().toISOString().slice(0, 10)
   todayEntry.value = await findMyEntryForDate(todayIso)
   todayDispute.value = null
@@ -623,6 +644,7 @@ async function finalizeSubmit() {
   // ať se neztratí, co kurýr už vyplnil/přeskočil, než stihne nahlásit chybu.
   if (ok) {
     exitWizard()
+    forceShowForm.value = false
     await checkTodayEntry()
   }
 }
@@ -774,6 +796,14 @@ onMounted(async () => {
           čeká na schválení adminem.
         </p>
       </template>
+    </div>
+
+    <div class="card" v-else-if="showDayOffMessage">
+      <h3 style="margin-top:0">Dnes nic na práci</h3>
+      <p style="margin:0 0 10px">{{ todayDayOffMessage }} Užij si volno!</p>
+      <button type="button" class="btn secondary" @click="forceShowForm = true">
+        Vyplnit trasu zpětně
+      </button>
     </div>
 
     <div class="card" v-else>

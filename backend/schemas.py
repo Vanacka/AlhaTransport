@@ -106,6 +106,12 @@ class VacationDayColor(BaseModel):
     holiday_name: Optional[str] = None
 
 
+class TodayStatusOut(BaseModel):
+    is_day_off: bool
+    reason: Optional[str] = None  # "weekend" | "holiday" | "vacation" | None
+    holiday_name: Optional[str] = None
+
+
 # ---------- Performance ----------
 
 class RouteCreate(BaseModel):
@@ -263,12 +269,43 @@ class DailyChecklistUpdate(BaseModel):
     refueled: Optional[bool] = None
 
 
+class HomeTaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: int
+    date: date
+    text: str
+    done: bool
+    series_id: int
+
+
+class HomeTaskCreate(BaseModel):
+    text: str
+    date: date  # první den, na který se úkol založí
+    user_ids: list[int]
+    # Opakování - bez vyplnění (nebo "once") jde o jednorázový úkol jen na `date`.
+    # "week": opakuje se v zaškrtnutých pracovních dnech (weekdays, 0=pondělí..4=pátek)
+    #   každý repeat_interval-tý týden (1 = každý týden, 2 = každé dva týdny, ...).
+    # "month": opakuje se ve stejný den v měsíci jako `date`, každý měsíc.
+    repeat_unit: Optional[str] = None  # "once" | "week" | "month"
+    repeat_interval: Optional[int] = None
+    weekdays: Optional[list[int]] = None
+    repeat_until: Optional[date] = None
+
+
+class HomeTaskUpdate(BaseModel):
+    done: bool
+
+
 class DailyChecklistOut(BaseModel):
     date: date
     car_checked: bool
     refueled: bool
     form_filled: bool  # dopočítáno z existence PerformanceEntry za daný den
-    on_vacation: bool  # dopočítáno ze schválené dovolené na daný den
+    is_day_off: bool  # víkend, státní svátek, nebo schválená dovolená
+    day_off_reason: Optional[str] = None  # "weekend" | "holiday" | "vacation" | None
+    holiday_name: Optional[str] = None
+    extra_tasks: list[HomeTaskOut] = []
 
 
 # ---------- Notifications ----------
