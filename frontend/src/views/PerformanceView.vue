@@ -222,9 +222,13 @@ const showTodayDoneMessage = computed(() =>
   !editingId.value && !resumingDispute.value && (todayEntry.value?.confirmed === true || !!todayDispute.value),
 )
 
+// Karta "dnes máš volno" jde přebít - kurýr může i tak chtít zpětně vyplnit
+// jiný den (nebo i dnešek, pokud přesto pracoval), viz tlačítko na kartě.
+const forceShowForm = ref(false)
+
 const showDayOffMessage = computed(() =>
   !showTodayDoneMessage.value && !wizardActive.value && !editingId.value &&
-  !resumingDispute.value && !reportMode.value && !!todayStatus.value?.is_day_off,
+  !resumingDispute.value && !reportMode.value && !!todayStatus.value?.is_day_off && !forceShowForm.value,
 )
 
 // Zpětně vyplňovaný formulář (jiný den než dnešek) nejde nechat nekompletní -
@@ -640,6 +644,7 @@ async function finalizeSubmit() {
   // ať se neztratí, co kurýr už vyplnil/přeskočil, než stihne nahlásit chybu.
   if (ok) {
     exitWizard()
+    forceShowForm.value = false
     await checkTodayEntry()
   }
 }
@@ -795,7 +800,10 @@ onMounted(async () => {
 
     <div class="card" v-else-if="showDayOffMessage">
       <h3 style="margin-top:0">Dnes nic na práci</h3>
-      <p style="margin:0">{{ todayDayOffMessage }} Užij si volno!</p>
+      <p style="margin:0 0 10px">{{ todayDayOffMessage }} Užij si volno!</p>
+      <button type="button" class="btn secondary" @click="forceShowForm = true">
+        Vyplnit trasu zpětně
+      </button>
     </div>
 
     <div class="card" v-else>
