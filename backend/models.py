@@ -265,6 +265,10 @@ class HomeTask(Base):
     done = Column(Boolean, default=False)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Sdílené id pro všechny výskyty vzniklé jedním zadáním (víc kurýrů a/nebo
+    # opakování každých N dní) - jde je pak smazat najednou jako celek. Jednorázový
+    # úkol na jednoho kurýra má "sérii" o jednom řádku (series_id = vlastní id).
+    series_id = Column(Integer, nullable=True, index=True)
 
     user = relationship("User", foreign_keys=[user_id])
     created_by = relationship("User", foreign_keys=[created_by_id])

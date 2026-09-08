@@ -1,4 +1,5 @@
-from datetime import date as date_type
+import calendar
+from datetime import date as date_type, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -141,22 +142,96 @@ def trigger_daily_check(
     return {"date": day, "notified": notified}
 
 
+MAX_TASK_OCCURRENCES = 60
+
+
+def _add_month(d: date_type, anchor_day: int) -> date_type:
+    """Posune na stejný den v dalším měsíci jako `anchor_day` (např. pořád 31.,
+    ne postupně se ukrajující den) - v měsíci, který ten den nemá (typicky únor),
+    se ořízne na jeho poslední den, ale příští měsíc už se zase vrátí na anchor_day."""
+    year = d.year + d.month // 12
+    month = d.month % 12 + 1
+    last_day = calendar.monthrange(year, month)[1]
+    return date_type(year, month, min(anchor_day, last_day))
+
+
+def _occurrence_dates(payload: HomeTaskCreate) -> list[date_type]:
+    unit = payload.repeat_unit or "once"
+    if unit == "once":
+        return [payload.date]
+
+    if not payload.repeat_until:
+        raise HTTPException(400, "Vyber datum, do kdy se má úkol opakovat")
+    if payload.repeat_until < payload.date:
+        raise HTTPException(400, "Konec opakování nesmí být před prvním dnem")
+
+    dates: list[date_type] = []
+
+    if unit == "week":
+        interval = payload.repeat_interval or 1
+        if interval < 1:
+            raise HTTPException(400, "Interval opakování musí být aspoň 1 týden")
+        weekdays = set(payload.weekdays or [])
+        if not weekdays:
+            raise HTTPException(400, "Vyber aspoň jeden pracovní den, ve kterém se má úkol opakovat")
+        if not weekdays.issubset({0, 1, 2, 3, 4}):
+            raise HTTPException(400, "Opakování jde nastavit jen na pracovní dny (pondělí až pátek)")
+
+        anchor_monday = payload.date - timedelta(days=payload.date.weekday())
+        d = payload.date
+        while d <= payload.repeat_until:
+            if d.weekday() in weekdays and ((d - anchor_monday).days // 7) % interval == 0:
+                dates.append(d)
+                if len(dates) > MAX_TASK_OCCURRENCES:
+                    raise HTTPException(
+                        400, f"Příliš mnoho výskytů (max {MAX_TASK_OCCURRENCES}) - zkrať období nebo interval",
+                    )
+            d += timedelta(days=1)
+
+    elif unit == "month":
+        anchor_day = payload.date.day
+        d = payload.date
+        while d <= payload.repeat_until:
+            dates.append(d)
+            if len(dates) > MAX_TASK_OCCURRENCES:
+                raise HTTPException(
+                    400, f"Příliš mnoho výskytů (max {MAX_TASK_OCCURRENCES}) - zkrať období",
+                )
+            d = _add_month(d, anchor_day)
+
+    else:
+        raise HTTPException(400, "Neplatný typ opakování")
+
+    if not dates:
+        raise HTTPException(400, "Zvolené opakování v daném období nevygenerovalo žádný den")
+    return dates
+
+
 @router.post("/tasks", response_model=list[HomeTaskOut])
 def create_home_tasks(
     payload: HomeTaskCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Přidá jeden ad-hoc úkol navíc jednomu nebo víc kurýrům na konkrétní den -
-    kurýr ho uvidí na hlavní stránce, ať už je ten den víkend, svátek, dovolená,
-    nebo normální pracovní den."""
+    """Přidá ad-hoc úkol navíc jednomu nebo víc kurýrům na konkrétní den, případně
+    opakovaně (v zaškrtnutých pracovních dnech každý týden/N týdnů, nebo každý
+    měsíc) až do zvoleného konce - kurýr ho uvidí na hlavní stránce, ať už je ten
+    den víkend, svátek, dovolená, nebo normální pracovní den. Všechny takto vzniklé
+    řádky sdílí stejné series_id, aby šly případně smazat najednou jako celek."""
     if not payload.user_ids:
         raise HTTPException(400, "Vyber aspoň jednoho kurýra")
+
+    dates = _occurrence_dates(payload)
     tasks = [
-        HomeTask(user_id=uid, date=payload.date, text=payload.text, created_by_id=current_user.id)
+        HomeTask(user_id=uid, date=d, text=payload.text, created_by_id=current_user.id)
+        for d in dates
         for uid in payload.user_ids
     ]
     db.add_all(tasks)
+    db.flush()
+    series_id = tasks[0].id
+    for t in tasks:
+        t.series_id = series_id
     db.commit()
     for t in tasks:
         db.refresh(t)
@@ -193,6 +268,16 @@ def update_home_task(
     db.commit()
     db.refresh(task)
     return task
+
+
+@router.delete("/tasks/series/{series_id}")
+def delete_home_task_series(series_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """Smaže najednou všechny výskyty jedné opakující se (nebo víc-kurýrní) série."""
+    deleted = db.query(HomeTask).filter(HomeTask.series_id == series_id).delete()
+    db.commit()
+    if not deleted:
+        raise HTTPException(404, "Série nenalezena")
+    return {"ok": True, "deleted": deleted}
 
 
 @router.delete("/tasks/{task_id}")

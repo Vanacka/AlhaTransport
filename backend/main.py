@@ -118,9 +118,24 @@ def _ensure_vacation_fields() -> None:
         ))
 
 
+def _ensure_home_task_fields() -> None:
+    inspector = inspect(engine)
+    existing = {c["name"] for c in inspector.get_columns("home_tasks")}
+    with engine.begin() as conn:
+        if "series_id" not in existing:
+            conn.execute(text("ALTER TABLE home_tasks ADD COLUMN series_id INTEGER"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_home_tasks_series_id ON home_tasks(series_id)"
+        ))
+        conn.execute(text(
+            "UPDATE home_tasks SET series_id = id WHERE series_id IS NULL"
+        ))
+
+
 _ensure_columns()
 _ensure_core_performance_fields()
 _ensure_vacation_fields()
+_ensure_home_task_fields()
 
 app = FastAPI(title="MiruvWeb API")
 
