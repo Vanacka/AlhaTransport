@@ -327,6 +327,8 @@ def create_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if current_user.role == UserRole.admin:
+        raise HTTPException(403, "Admin nemůže zakládat nové záznamy výkonu, jen upravovat stávající")
     _assert_route_allowed(current_user, payload.route_id)
     _validate_required_fields(db, payload)
     _assert_no_skip_if_backdated(current_user, payload)

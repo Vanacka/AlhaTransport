@@ -775,7 +775,7 @@ onMounted(async () => {
   await Promise.all([loadRoutes(), loadFields(), loadUsers(), loadDisputes()])
   await loadEntries()
   await loadAverages()
-  await checkTodayEntry()
+  if (!isAdmin.value) await checkTodayEntry()
 })
 </script>
 
@@ -806,7 +806,7 @@ onMounted(async () => {
       </button>
     </div>
 
-    <div class="card" v-else>
+    <div class="card" v-else-if="!isAdmin || editingId">
       <h3 style="margin-top:0">
         {{ resumingDispute ? 'Nahlášení chyby na trase' : editingId && !resuming ? 'Upravit záznam' : 'Nový záznam' }}
       </h3>
