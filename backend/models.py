@@ -274,6 +274,36 @@ class HomeTask(Base):
     created_by = relationship("User", foreign_keys=[created_by_id])
 
 
+document_visible_users = Table(
+    "document_visible_users",
+    Base.metadata,
+    Column("document_id", Integer, ForeignKey("documents.id"), primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+)
+
+
+class Document(Base):
+    """Tutoriál (text) a/nebo nahraný dokument (soubor), který admin zveřejní
+    kurýrům. Viditelnost: buď pro všechny (visible_to_all), nebo jen pro
+    vybrané uživatele (visible_to_users) - stejný princip jako u preferovaných
+    tras kurýra."""
+    __tablename__ = "documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=True)
+    file_path = Column(String, nullable=True)
+    file_name = Column(String, nullable=True)
+    visible_to_all = Column(Boolean, default=True, nullable=False)
+    position = Column(Integer, default=0)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    visible_to_users = relationship("User", secondary=document_visible_users)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

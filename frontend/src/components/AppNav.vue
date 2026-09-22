@@ -10,6 +10,7 @@ const navItems = [
   { to: '/nafta', label: 'Nafta', icon: 'fuel' as const },
   { to: '/dovolena', label: 'Dovolená', icon: 'vacation' as const },
   { to: '/vykon', label: 'Výkon', icon: 'performance' as const },
+  { to: '/tutorialy', label: 'Tutoriály', icon: 'tutorials' as const },
 ]
 </script>
 

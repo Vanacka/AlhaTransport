@@ -25,6 +25,9 @@ interface Checklist {
 
 interface UserOption { id: number; full_name: string; role: 'admin' | 'courier' }
 
+interface MyFieldSummary { key: string; label: string; total: number; avg: number }
+interface MySummary { year: number; month: number; entries_count: number; fields: MyFieldSummary[] }
+
 interface TaskGroup {
   series_id: number
   text: string
@@ -60,6 +63,24 @@ const doneCount = computed(() => {
 
 async function load() {
   checklist.value = await api.get<Checklist>('/checklist/today')
+}
+
+const summary = ref<MySummary | null>(null)
+const summaryMonthLabel = computed(() => {
+  if (!summary.value) return ''
+  return new Date(summary.value.year, summary.value.month - 1, 1).toLocaleDateString('cs-CZ', {
+    month: 'long',
+    year: 'numeric',
+  })
+})
+
+function roundStat(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1)
+}
+
+async function loadSummary() {
+  if (isAdmin.value) return
+  summary.value = await api.get<MySummary>('/performance/my-summary')
 }
 
 async function toggle(field: 'car_checked' | 'refueled') {
@@ -246,7 +267,7 @@ async function deleteSeries(g: TaskGroup) {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadAdminData()])
+  await Promise.all([load(), loadAdminData(), loadSummary()])
 })
 </script>
 
@@ -326,6 +347,25 @@ onMounted(async () => {
           </button>
         </li>
       </ul>
+    </div>
+
+    <div class="card" v-if="!isAdmin && summary">
+      <h3 style="margin-top:0">Tvůj měsíc <span style="color:var(--muted);font-weight:400">· {{ summaryMonthLabel }}</span></h3>
+      <p v-if="!summary.entries_count" style="color:var(--muted);margin:0">
+        Tento měsíc zatím nemáš vyplněný žádný formulář výkonu.
+      </p>
+      <template v-else>
+        <p style="font-size:13px;color:var(--muted);margin-top:-6px">
+          Vyplněných dní: {{ summary.entries_count }}
+        </p>
+        <div class="stat-grid">
+          <div class="stat-item" v-for="f in summary.fields" :key="f.key">
+            <div class="stat-label">{{ f.label }}</div>
+            <div class="stat-total">{{ roundStat(f.total) }}</div>
+            <div class="stat-avg">Ø {{ roundStat(f.avg) }} / den</div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <div class="card" v-if="isAdmin">

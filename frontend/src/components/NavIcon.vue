@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ name: 'home' | 'fuel' | 'vacation' | 'performance' | 'people' }>()
+defineProps<{ name: 'home' | 'fuel' | 'vacation' | 'performance' | 'people' | 'tutorials' }>()
 </script>
 
 <template>
@@ -39,6 +39,15 @@ defineProps<{ name: 'home' | 'fuel' | 'vacation' | 'performance' | 'people' }>()
     <path d="M4 19V5" />
     <path d="M4 19h16" />
     <path d="M8 15v-4M12.5 15V8M17 15v-6" />
+  </svg>
+  <svg
+    v-else-if="name === 'tutorials'"
+    viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+  >
+    <path d="M6 4h9l3 3v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
+    <path d="M15 4v3h3" />
+    <path d="M8 12h8M8 16h5" />
   </svg>
   <svg
     v-else-if="name === 'people'"
