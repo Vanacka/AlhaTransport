@@ -18,6 +18,7 @@ from routers import vacation as vacation_router
 from routers import performance as performance_router
 from routers import notifications as notifications_router
 from routers import checklist as checklist_router
+from routers import documents as documents_router
 from routers.checklist import run_daily_incomplete_check
 
 Base.metadata.create_all(bind=engine)
@@ -150,6 +151,7 @@ app.add_middleware(
 )
 
 os.makedirs("uploads/receipts", exist_ok=True)
+os.makedirs("uploads/documents", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth_router.router)
@@ -158,6 +160,7 @@ app.include_router(vacation_router.router)
 app.include_router(performance_router.router)
 app.include_router(notifications_router.router)
 app.include_router(checklist_router.router)
+app.include_router(documents_router.router)
 
 
 @app.on_event("startup")

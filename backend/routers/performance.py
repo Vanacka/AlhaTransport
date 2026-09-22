@@ -14,12 +14,13 @@ from database import get_db
 from auth import get_current_user, require_admin
 from models import (
     User, UserRole, Route, PerformanceEntry, PerformanceEntryEdit, PerformanceEntryDispute,
-    DisputeStatus, PerformanceFieldDefinition, Notification,
+    DisputeStatus, PerformanceFieldDefinition, PerformanceFieldType, Notification,
 )
 from schemas import (
     RouteCreate, RouteOut, RouteAssignmentUpdate, PerformanceFieldCreate, PerformanceFieldUpdate,
     PerformanceFieldOut, PerformanceEntryCreate, PerformanceEntryOut, PerformanceEntryEditOut,
     DisputeCreate, DisputeResolve, PerformanceEntryDisputeOut, PerformanceAverages,
+    MyPerformanceSummary, MyPerformanceFieldSummary,
 )
 from holidays import is_czech_state_holiday
 
@@ -326,6 +327,8 @@ def create_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if current_user.role == UserRole.admin:
+        raise HTTPException(403, "Admin nemůže zakládat nové záznamy výkonu, jen upravovat stávající")
     _assert_route_allowed(current_user, payload.route_id)
     _validate_required_fields(db, payload)
     _assert_no_skip_if_backdated(current_user, payload)
@@ -773,3 +776,42 @@ def averages(
             entries_count=count,
         ))
     return result
+
+
+@router.get("/my-summary", response_model=MyPerformanceSummary)
+def my_summary(
+    year: Optional[int] = None, month: Optional[int] = None,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Vlastní měsíční souhrn kurýra (průměry a součty) pro domovskou stránku -
+    počítá se ze všech aktivních číselných polí (core i vlastní admin pole),
+    ať se automaticky rozšíří o cokoliv, co si admin přidá."""
+    today = date_type.today()
+    y = year or today.year
+    m = month or today.month
+
+    entries = [
+        e for e in db.query(PerformanceEntry).filter(PerformanceEntry.user_id == current_user.id).all()
+        if e.date.year == y and e.date.month == m
+    ]
+    count = len(entries)
+
+    fields = db.query(PerformanceFieldDefinition).filter(
+        PerformanceFieldDefinition.active == True,  # noqa: E712
+        PerformanceFieldDefinition.field_type == PerformanceFieldType.number,
+    ).order_by(PerformanceFieldDefinition.position).all()
+
+    field_summaries = []
+    for f in fields:
+        values = [
+            (getattr(e, f.key) if f.core else e.extra_fields.get(f.key)) or 0
+            for e in entries
+        ]
+        total = sum(values)
+        field_summaries.append(MyPerformanceFieldSummary(
+            key=f.key, label=f.label,
+            total=total,
+            avg=(total / count) if count else 0,
+        ))
+
+    return MyPerformanceSummary(year=y, month=m, entries_count=count, fields=field_summaries)

@@ -25,6 +25,9 @@ interface Checklist {
 
 interface UserOption { id: number; full_name: string; role: 'admin' | 'courier' }
 
+interface MyFieldSummary { key: string; label: string; total: number; avg: number }
+interface MySummary { year: number; month: number; entries_count: number; fields: MyFieldSummary[] }
+
 interface TaskGroup {
   series_id: number
   text: string
@@ -59,7 +62,26 @@ const doneCount = computed(() => {
 })
 
 async function load() {
+  if (isAdmin.value) return
   checklist.value = await api.get<Checklist>('/checklist/today')
+}
+
+const summary = ref<MySummary | null>(null)
+const summaryMonthLabel = computed(() => {
+  if (!summary.value) return ''
+  return new Date(summary.value.year, summary.value.month - 1, 1).toLocaleDateString('cs-CZ', {
+    month: 'long',
+    year: 'numeric',
+  })
+})
+
+function roundStat(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1)
+}
+
+async function loadSummary() {
+  if (isAdmin.value) return
+  summary.value = await api.get<MySummary>('/performance/my-summary')
 }
 
 async function toggle(field: 'car_checked' | 'refueled') {
@@ -246,7 +268,7 @@ async function deleteSeries(g: TaskGroup) {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadAdminData()])
+  await Promise.all([load(), loadAdminData(), loadSummary()])
 })
 </script>
 
@@ -255,77 +277,131 @@ onMounted(async () => {
     <h1><span class="eyebrow">Dnešní směna</span>Ahoj, {{ user?.full_name }}</h1>
     <p class="today-date">{{ todayLabel }}</p>
 
-    <div class="card vacation-card" v-if="checklist?.is_day_off">
-      <h3 style="margin-top: 0">{{ dayOffTitle }}{{ checklist.holiday_name ? ` (${checklist.holiday_name})` : '' }}</h3>
-      <p style="margin: 0; color: var(--muted)">Žádné úkoly na dnešek nemáš, užij si volno.</p>
-    </div>
-
-    <div class="card checklist-card" v-else-if="checklist">
-      <div class="checklist-header">
-        <h3>Úkoly na dnešní den</h3>
-        <span class="checklist-progress">{{ doneCount }}/3 hotovo</span>
+    <template v-if="!isAdmin">
+      <div class="card vacation-card" v-if="checklist?.is_day_off">
+        <h3 style="margin-top: 0">{{ dayOffTitle }}{{ checklist.holiday_name ? ` (${checklist.holiday_name})` : '' }}</h3>
+        <p style="margin: 0; color: var(--muted)">Žádné úkoly na dnešek nemáš, užij si volno.</p>
       </div>
 
+      <div class="card checklist-card" v-else-if="checklist">
+        <div class="checklist-header">
+          <h3>Úkoly na dnešní den</h3>
+          <span class="checklist-progress">{{ doneCount }}/3 hotovo</span>
+        </div>
+
+        <ul class="checklist">
+          <li class="checklist-item" :class="{ done: checklist.car_checked }">
+            <button
+              type="button"
+              class="check-toggle"
+              :disabled="savingField === 'car_checked'"
+              @click="toggle('car_checked')"
+            >
+              <span class="check-box" :class="{ checked: checklist.car_checked }"></span>
+              <span class="check-label">Zkontrolovat auto</span>
+            </button>
+          </li>
+
+          <li class="checklist-item" :class="{ done: checklist.refueled }">
+            <button
+              type="button"
+              class="check-toggle"
+              :disabled="savingField === 'refueled'"
+              @click="toggle('refueled')"
+            >
+              <span class="check-box" :class="{ checked: checklist.refueled }"></span>
+              <span class="check-label">Natankovat</span>
+            </button>
+          </li>
+
+          <li class="checklist-item" :class="{ done: checklist.form_filled }">
+            <router-link to="/vykon" class="check-toggle">
+              <span class="check-box" :class="{ checked: checklist.form_filled }"></span>
+              <span class="check-label">
+                Vyplnit formulář trasy
+                <span class="check-hint">
+                  {{
+                    checklist.form_filled
+                      ? 'Dnes už vyplněno'
+                      : 'Odškrtne se, až formulář výkonu vyplníš celý bez přeskočení'
+                  }}
+                </span>
+              </span>
+            </router-link>
+          </li>
+        </ul>
+      </div>
+
+      <div class="card" v-else>Načítám úkoly…</div>
+
+      <div class="card checklist-card" v-if="checklist?.extra_tasks?.length">
+        <h3 style="margin-top:0">Úkoly navíc na dnešek</h3>
+        <ul class="checklist">
+          <li v-for="t in checklist.extra_tasks" :key="t.id" class="checklist-item" :class="{ done: t.done }">
+            <button
+              type="button"
+              class="check-toggle"
+              :disabled="togglingTaskId === t.id"
+              @click="toggleTask(t)"
+            >
+              <span class="check-box" :class="{ checked: t.done }"></span>
+              <span class="check-label">{{ t.text }}</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+    </template>
+
+    <div class="card checklist-card" v-else>
+      <div class="checklist-header">
+        <h3>Úkoly kurýra <span class="badge unpaid" style="margin-left:8px;font-weight:500">jen náhled</span></h3>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:-4px 20px 8px">
+        Takto vidí každý kurýr svoje úkoly na hlavní stránce. Tady si to jen prohlédneš - kliknutí nic
+        neukládá. Jednorázové nebo opakující se úkoly navíc kurýrům přidáš níže.
+      </p>
       <ul class="checklist">
-        <li class="checklist-item" :class="{ done: checklist.car_checked }">
-          <button
-            type="button"
-            class="check-toggle"
-            :disabled="savingField === 'car_checked'"
-            @click="toggle('car_checked')"
-          >
-            <span class="check-box" :class="{ checked: checklist.car_checked }"></span>
+        <li class="checklist-item done">
+          <button type="button" class="check-toggle" disabled>
+            <span class="check-box checked"></span>
             <span class="check-label">Zkontrolovat auto</span>
           </button>
         </li>
-
-        <li class="checklist-item" :class="{ done: checklist.refueled }">
-          <button
-            type="button"
-            class="check-toggle"
-            :disabled="savingField === 'refueled'"
-            @click="toggle('refueled')"
-          >
-            <span class="check-box" :class="{ checked: checklist.refueled }"></span>
+        <li class="checklist-item">
+          <button type="button" class="check-toggle" disabled>
+            <span class="check-box"></span>
             <span class="check-label">Natankovat</span>
           </button>
         </li>
-
-        <li class="checklist-item" :class="{ done: checklist.form_filled }">
-          <router-link to="/vykon" class="check-toggle">
-            <span class="check-box" :class="{ checked: checklist.form_filled }"></span>
+        <li class="checklist-item">
+          <button type="button" class="check-toggle" disabled>
+            <span class="check-box"></span>
             <span class="check-label">
               Vyplnit formulář trasy
-              <span class="check-hint">
-                {{
-                  checklist.form_filled
-                    ? 'Dnes už vyplněno'
-                    : 'Odškrtne se, až formulář výkonu vyplníš celý bez přeskočení'
-                }}
-              </span>
+              <span class="check-hint">Odškrtne se, až kurýr formulář výkonu vyplní celý bez přeskočení</span>
             </span>
-          </router-link>
+          </button>
         </li>
       </ul>
     </div>
 
-    <div class="card" v-else>Načítám úkoly…</div>
-
-    <div class="card checklist-card" v-if="checklist?.extra_tasks?.length">
-      <h3 style="margin-top:0">Úkoly navíc na dnešek</h3>
-      <ul class="checklist">
-        <li v-for="t in checklist.extra_tasks" :key="t.id" class="checklist-item" :class="{ done: t.done }">
-          <button
-            type="button"
-            class="check-toggle"
-            :disabled="togglingTaskId === t.id"
-            @click="toggleTask(t)"
-          >
-            <span class="check-box" :class="{ checked: t.done }"></span>
-            <span class="check-label">{{ t.text }}</span>
-          </button>
-        </li>
-      </ul>
+    <div class="card" v-if="!isAdmin && summary">
+      <h3 style="margin-top:0">Tvůj měsíc <span style="color:var(--muted);font-weight:400">· {{ summaryMonthLabel }}</span></h3>
+      <p v-if="!summary.entries_count" style="color:var(--muted);margin:0">
+        Tento měsíc zatím nemáš vyplněný žádný formulář výkonu.
+      </p>
+      <template v-else>
+        <p style="font-size:13px;color:var(--muted);margin-top:-6px">
+          Vyplněných dní: {{ summary.entries_count }}
+        </p>
+        <div class="stat-grid">
+          <div class="stat-item" v-for="f in summary.fields" :key="f.key">
+            <div class="stat-label">{{ f.label }}</div>
+            <div class="stat-total">{{ roundStat(f.total) }}</div>
+            <div class="stat-avg">Ø {{ roundStat(f.avg) }} / den</div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <div class="card" v-if="isAdmin">

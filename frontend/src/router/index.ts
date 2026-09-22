@@ -9,6 +9,7 @@ const router = createRouter({
     { path: '/nafta', name: 'fuel', component: () => import('../views/FuelView.vue') },
     { path: '/dovolena', name: 'vacation', component: () => import('../views/VacationView.vue') },
     { path: '/vykon', name: 'performance', component: () => import('../views/PerformanceView.vue') },
+    { path: '/tutorialy', name: 'tutorials', component: () => import('../views/TutorialsView.vue') },
     {
       path: '/zamestnanci',
       name: 'users',

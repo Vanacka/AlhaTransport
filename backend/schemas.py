@@ -262,6 +262,20 @@ class PerformanceAverages(BaseModel):
     entries_count: int
 
 
+class MyPerformanceFieldSummary(BaseModel):
+    key: str
+    label: str
+    total: float
+    avg: float
+
+
+class MyPerformanceSummary(BaseModel):
+    year: int
+    month: int
+    entries_count: int
+    fields: list[MyPerformanceFieldSummary] = []
+
+
 # ---------- Denní checklist ----------
 
 class DailyChecklistUpdate(BaseModel):
@@ -306,6 +320,38 @@ class DailyChecklistOut(BaseModel):
     day_off_reason: Optional[str] = None  # "weekend" | "holiday" | "vacation" | None
     holiday_name: Optional[str] = None
     extra_tasks: list[HomeTaskOut] = []
+
+
+# ---------- Dokumenty / tutoriály ----------
+
+class DocumentCreate(BaseModel):
+    title: str
+    content: Optional[str] = None
+    visible_to_all: bool = True
+    visible_user_ids: list[int] = []
+
+
+class DocumentUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    visible_to_all: Optional[bool] = None
+    visible_user_ids: Optional[list[int]] = None
+    position: Optional[int] = None
+
+
+class DocumentOut(BaseModel):
+    id: int
+    title: str
+    content: Optional[str]
+    file_path: Optional[str]
+    file_name: Optional[str]
+    visible_to_all: bool
+    visible_user_ids: list[int]
+    position: int
+    created_by_id: int
+    created_by_name: str
+    created_at: datetime
+    updated_at: datetime
 
 
 # ---------- Notifications ----------
