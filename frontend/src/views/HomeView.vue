@@ -274,7 +274,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <h1><span class="eyebrow">Dnešní směna</span>Ahoj, {{ user?.full_name }}</h1>
+    <h1><span class="eyebrow">Dnešní směna</span>Čau, {{ user?.full_name }}</h1>
     <p class="today-date">{{ todayLabel }}</p>
 
     <template v-if="!isAdmin">
