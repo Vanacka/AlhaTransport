@@ -18,18 +18,22 @@ docker compose up --build
 
 Výchozí admin účet (lze přepsat přes env proměnné, viz `docker-compose.yml`):
 
-- uživatel: `mirek`
-- heslo: `changeme123`
+- uživatel: `admin`
+- heslo: `admin`
 
-## Lokální vývoj bez Dockeru
+## Lokální vývoj
 
 ### Backend
-
+#### Windows
 ```bash
 cd backend
-python -m venv .venv
+source .venv/Scripts/Activate
+uvicorn main:app --reload
+```
+#### Linux
+```
+cd backend
 source .venv/bin/activate
-pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
@@ -37,8 +41,13 @@ uvicorn main:app --reload
 
 ```bash
 cd frontend
-npm install
 npm run dev -- --port 3000
+```
+
+### Co udělat na lokále po merge
+```
+git sync
+git push
 ```
 
 ## Konfigurace
